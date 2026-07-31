@@ -76,7 +76,7 @@ Este é o ponto de partida. Confira cada item com os próprios olhos antes de co
 
 ### O que não está
 
-Sem correlação entre log e trace. Sem span de negócio nenhum. Sem propagação de contexto pela fila, então o que a `api` faz e o que o `worker` faz aparecem como dois traces separados. Sem métrica de negócio. Sem dashboard. Sem regra de alerta.
+Sem correlação entre log e trace. Sem span de negócio nenhum. Sem propagação de contexto pela fila, então o que a `api` faz e o que o `worker` faz aparecem como dois traces separados. Sem métrica de negócio. Sem regra de alerta. E o dashboard tem um painel só, que não responde nem metade do que precisa ser respondido.
 
 E tem um problema plantado na instrumentação de métricas que já existe, que o requisito 3 trata.
 
@@ -142,7 +142,7 @@ A proibição de cardinalidade vale para métrica. Em span e em log o identifica
 
 Por quê. Dashboard construído na mão dentro do Grafana morre com o container: não é versionado, não é revisado, ninguém sabe quem mudou o quê. E dashboard eficaz não é o que mostra tudo, é o que cabe numa tela e responde as perguntas que alguém vai fazer às três da manhã.
 
-Tarefa. Complete o dashboard que já vem provisionado no repositório, que hoje tem um painel só. No fim ele tem no máximo quatro painéis e responde estas três perguntas:
+Tarefa. Complete o dashboard `Pedidos`, que já vem provisionado em `grafana/provisioning/dashboards/pedidos.json` e hoje tem um painel só. No fim ele tem no máximo quatro painéis e responde estas três perguntas:
 
 - o sistema está com erro?
 - o sistema está lento?
@@ -267,7 +267,8 @@ Integridade
 ├── grafana/
 │   └── provisioning/
 │       ├── datasources/          já configurado
-│       └── dashboards/           um painel pronto, você completa
+│       └── dashboards/
+│           └── pedidos.json      um painel pronto, você completa
 └── reports/
     └── incidente.md              (você escreve)
 ```
