@@ -15,7 +15,7 @@ Seu trabalho é terminar o serviço e depois usá-lo. Terminar significa ligar o
 
 Você entrou no time de plataforma de uma loja online. O sistema roda em produção e alguém, meses atrás, adicionou observabilidade nele e não terminou. O Jaeger mostra spans de rota e de banco, o log sai em JSON, o Prometheus está coletando. Parece que tem tudo.
 
-Aí o financeiro fechou o mês e faltou dinheiro. Cruzaram os pedidos que aparecem confirmados para o cliente com o que efetivamente entrou, e encontraram pedidos confirmados que nunca foram cobrados. Alguém abriu o Grafana, não achou nada, e a resposta que circula pelo Slack é que deve ser problema do banco. Você foi contratado para acabar com o palpite.
+Aí o financeiro fechou o mês e faltou dinheiro. Alguém abriu o Grafana, não achou nada, e a resposta que circula pelo Slack é que deve ser problema do banco. Você foi contratado para acabar com o palpite.
 
 ## Sobre o foco do desafio
 
@@ -76,9 +76,17 @@ Este é o ponto de partida. Confira cada item com os próprios olhos antes de co
 
 ### O que não está
 
-Sem correlação entre log e trace. Sem span de negócio nenhum. Sem propagação de contexto pela fila, então o que a `api` faz e o que o `worker` faz aparecem como dois traces separados. Sem métrica de negócio. Sem regra de alerta. E o dashboard tem um painel só, que não responde nem metade do que precisa ser respondido.
+Nada liga o log ao trace, e não existe nenhum span de negócio. O contexto não atravessa a fila, então o que a `api` faz e o que o `worker` faz aparecem hoje como dois traces separados, sem relação entre si. Não existe métrica de negócio nem regra de alerta, e o dashboard tem um painel só.
 
-E tem um problema plantado na instrumentação de métricas que já existe, que o requisito 3 trata.
+Além disso, tem um problema plantado na instrumentação de métricas que já existe, que o requisito 3 trata.
+
+## A queixa
+
+**"Fechamos o mês e faltou dinheiro."** O financeiro cruzou os pedidos que aparecem como confirmados para o cliente com o que efetivamente entrou, e encontrou pedidos confirmados que nunca foram cobrados. Reproduz com `cenario-a`.
+
+Pista: do lado de fora está tudo 2xx, o cliente recebe sucesso e o pedido aparece confirmado. Monitoramento de caixa preta não enxerga isso, e é por isso que o Grafana não mostrou nada. A resposta está no que o código sabe e hoje não conta a ninguém.
+
+## Ferramentas do ambiente
 
 ### O gerador de carga
 
@@ -91,17 +99,7 @@ Cada cenário roda até você interromper com Ctrl+C, e aceita `-d` para ficar e
 
 ### O receptor de alertas
 
-`http://localhost:9099`, um serviço mínimo que recebe webhook do Alertmanager e registra no stdout tudo que chega. É a sua prova de que o alerta disparou. Não instrumente esse serviço.
-
-## A queixa
-
-**"Fechamos o mês e faltou dinheiro."** O financeiro cruzou os pedidos que aparecem como confirmados para o cliente com o que efetivamente entrou, e encontrou pedidos confirmados que nunca foram cobrados. Reproduz com `cenario-a`.
-
-Pista: do lado de fora está tudo 2xx, o cliente recebe sucesso e o pedido aparece confirmado. Monitoramento de caixa preta não enxerga isso, e é por isso que o Grafana não mostrou nada. A resposta está no que o código sabe e hoje não conta a ninguém.
-
-## Tecnologias obrigatórias
-
-Todas já estão no projeto e no `compose.yaml`: Node 20 com TypeScript, `prom-client` para métricas, OpenTelemetry SDK for Node para tracing, Prometheus, Grafana, Jaeger e Alertmanager. É proibido substituir qualquer componente por serviço de terceiros, porque a entrega roda inteira na máquina do avaliador.
+`http://localhost:9099`, um serviço mínimo que recebe webhook do Alertmanager e registra no stdout tudo que chega. É a sua prova de que o alerta disparou.
 
 ## Requisitos
 
@@ -181,10 +179,10 @@ E substitua o `README.md` do projeto base por um com estas três seções, com e
 
 ## Restrições (não negociáveis)
 
-- Você completa a instrumentação. Não altera comportamento funcional, não muda o contrato das rotas existentes e não corrige o defeito da aplicação
+- Você completa a instrumentação. Não altera comportamento funcional e não muda o contrato das rotas existentes
 - Escrever dentro de um bloco que hoje não registra nada é instrumentação, não correção, e é esperado que você faça isso
 - Não altere a pasta `carga/` nem a pasta `receptor-alertas/`
-- Nenhum componente da stack pode ser substituído por serviço de terceiros
+- Nenhum componente da stack pode ser substituído por serviço de terceiros, porque a entrega roda inteira na máquina do avaliador
 - Dashboard entra por arquivo versionado. Você pode montar o painel pela interface do Grafana para experimentar, mas o que conta é o JSON versionado, e o ambiente subindo do zero tem que trazer tudo pronto sem nenhum clique
 - Nenhuma credencial nova em arquivo versionado. O que precisar de valor vem do `.env`
 
