@@ -1,10 +1,17 @@
 import http from 'node:http';
+import { SpanKind } from '@opentelemetry/api';
 import { atualizarStatusPedido } from '../db/consultas';
 import { esperarBanco, fecharPool } from '../db/pool';
 import { migrar } from '../db/migracao';
-import { consumirPedido, criarConexaoRedis } from '../fila/fila';
+import { consumirPedido, contextoDaMensagem, criarConexaoRedis } from '../fila/fila';
 import { log } from '../telemetria/log';
-import { TIPO_DE_CONTEUDO, coletar } from '../telemetria/metricas';
+import {
+  TIPO_DE_CONTEUDO,
+  coletar,
+  cobrancasProcessadas,
+  pedidosConfirmados,
+} from '../telemetria/metricas';
+import { registrarExcecaoNoSpan, tracer } from '../telemetria/rastro';
 import { processarPagamento } from './pagamento';
 import { registrarFalhaLegado } from './registro-legado';
 
@@ -42,21 +49,78 @@ async function processarMensagem(mensagem: Record<string, unknown>): Promise<voi
   const clienteId = String(mensagem.cliente_id);
   const valorTotal = Number(mensagem.valor_total);
 
-  log.info('mensagem do pedido ' + pedidoId + ' recebida da fila');
+  // O contexto veio dentro da mensagem: este span continua o trace aberto pelo
+  // `POST /pedidos`, em vez de comecar um trace novo no worker (requisito 2).
+  const contextoDoPedido = contextoDaMensagem(mensagem);
 
-  let recusado = false;
+  await tracer.startActiveSpan(
+    'pedido.processar',
+    {
+      kind: SpanKind.CONSUMER,
+      attributes: {
+        'pedido.id': pedidoId,
+        'pedido.cliente_id': clienteId,
+        'pedido.valor_total': valorTotal,
+        'fila.nome': 'pedidos',
+      },
+    },
+    contextoDoPedido,
+    async (span) => {
+      try {
+        log.info('mensagem do pedido ' + pedidoId + ' recebida da fila', {
+          pedido_id: pedidoId,
+        });
 
-  try {
-    const resultado = await processarPagamento(clienteId, valorTotal);
-    recusado = !resultado.aprovado;
-  } catch (erro) {
-    registrarFalhaLegado(erro);
-  }
+        let recusado = false;
 
-  const status = recusado ? 'recusado' : 'confirmado';
-  await atualizarStatusPedido(pedidoId, status);
+        try {
+          const resultado = await processarPagamento(clienteId, valorTotal);
+          recusado = !resultado.aprovado;
 
-  log.info('pedido ' + pedidoId + ' ficou ' + status);
+          const desfecho = recusado ? 'recusada' : 'aprovada';
+          cobrancasProcessadas.labels(desfecho).inc();
+          span.setAttribute('cobranca.resultado', desfecho);
+
+          if (recusado) {
+            log.warn('cobranca do pedido ' + pedidoId + ' foi recusada', {
+              pedido_id: pedidoId,
+            });
+          }
+        } catch (erro) {
+          registrarFalhaLegado(erro);
+
+          // Bloco que hoje nao registra nada. Instrumentar aqui e o que revela a
+          // queixa: a excecao morre neste catch e o pedido segue para confirmado.
+          const motivo = registrarExcecaoNoSpan(span, erro);
+          cobrancasProcessadas.labels('falha').inc();
+          span.setAttribute('cobranca.resultado', 'falha');
+
+          log.error('cobranca do pedido ' + pedidoId + ' falhou: ' + motivo, {
+            pedido_id: pedidoId,
+          });
+        }
+
+        const status = recusado ? 'recusado' : 'confirmado';
+        await atualizarStatusPedido(pedidoId, status);
+
+        if (status === 'confirmado') {
+          pedidosConfirmados.inc();
+        }
+
+        span.setAttribute('pedido.status', status);
+
+        log.info('pedido ' + pedidoId + ' ficou ' + status, { pedido_id: pedidoId });
+      } catch (erro) {
+        const motivo = registrarExcecaoNoSpan(span, erro);
+        log.error('falha ao processar o pedido ' + pedidoId + ': ' + motivo, {
+          pedido_id: pedidoId,
+        });
+        throw erro;
+      } finally {
+        span.end();
+      }
+    }
+  );
 }
 
 async function iniciar(): Promise<void> {

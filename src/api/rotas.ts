@@ -10,7 +10,8 @@ import {
 } from '../db/consultas';
 import { publicarPedido } from '../fila/fila';
 import { log } from '../telemetria/log';
-import { TIPO_DE_CONTEUDO, coletar } from '../telemetria/metricas';
+import { TIPO_DE_CONTEUDO, coletar, pedidosCriados } from '../telemetria/metricas';
+import { registrarExcecaoNoSpan, tracer } from '../telemetria/rastro';
 
 export function criarRotas(redis: Redis): Router {
   const rotas = Router();
@@ -48,34 +49,65 @@ export function criarRotas(redis: Redis): Router {
   });
 
   rotas.post('/pedidos', async (requisicao, resposta) => {
-    const clienteId = requisicao.body?.cliente_id;
-    const itens: ItemNovoPedido[] = requisicao.body?.itens;
+    // Span de negocio (requisito 2). Envolve a criacao e a publicacao na fila,
+    // porque e ele que precisa ser o pai do contexto injetado na mensagem.
+    await tracer.startActiveSpan('pedido.criar', async (span) => {
+      try {
+        const clienteId = requisicao.body?.cliente_id;
+        const itens: ItemNovoPedido[] = requisicao.body?.itens;
 
-    if (typeof clienteId !== 'string' || !Array.isArray(itens) || itens.length === 0) {
-      resposta.status(400).json({ erro: 'cliente_id e itens sao obrigatorios' });
-      return;
-    }
+        if (typeof clienteId !== 'string' || !Array.isArray(itens) || itens.length === 0) {
+          span.setAttribute('pedido.recusado_na_validacao', 'campos_obrigatorios');
+          resposta.status(400).json({ erro: 'cliente_id e itens sao obrigatorios' });
+          return;
+        }
 
-    const produtos = await buscarProdutosPorIds(itens.map((item) => item.produto_id));
-    const precoPorProduto = new Map(produtos.map((produto) => [produto.id, produto.preco]));
+        span.setAttributes({
+          'pedido.cliente_id': clienteId,
+          'pedido.quantidade_de_itens': itens.length,
+        });
 
-    const faltando = itens.filter((item) => !precoPorProduto.has(item.produto_id));
-    if (faltando.length > 0) {
-      resposta.status(400).json({ erro: 'produto inexistente no pedido' });
-      return;
-    }
+        const produtos = await buscarProdutosPorIds(itens.map((item) => item.produto_id));
+        const precoPorProduto = new Map(
+          produtos.map((produto) => [produto.id, produto.preco])
+        );
 
-    const pedido = await criarPedido(clienteId, itens, precoPorProduto);
+        const faltando = itens.filter((item) => !precoPorProduto.has(item.produto_id));
+        if (faltando.length > 0) {
+          span.setAttribute('pedido.recusado_na_validacao', 'produto_inexistente');
+          resposta.status(400).json({ erro: 'produto inexistente no pedido' });
+          return;
+        }
 
-    await publicarPedido(redis, {
-      pedido_id: pedido.id,
-      cliente_id: clienteId,
-      valor_total: pedido.valor_total,
+        const pedido = await criarPedido(clienteId, itens, precoPorProduto);
+
+        span.setAttributes({
+          'pedido.id': pedido.id,
+          'pedido.valor_total': pedido.valor_total,
+          'pedido.status': 'pendente',
+        });
+
+        await publicarPedido(redis, {
+          pedido_id: pedido.id,
+          cliente_id: clienteId,
+          valor_total: pedido.valor_total,
+        });
+
+        pedidosCriados.inc();
+
+        log.info('pedido ' + pedido.id + ' criado para ' + clienteId, {
+          pedido_id: pedido.id,
+        });
+
+        resposta.status(202).json({ pedido_id: pedido.id, status: 'pendente' });
+      } catch (erro) {
+        const motivo = registrarExcecaoNoSpan(span, erro);
+        log.error('falha ao criar pedido: ' + motivo);
+        throw erro;
+      } finally {
+        span.end();
+      }
     });
-
-    log.info('pedido ' + pedido.id + ' criado para ' + clienteId);
-
-    resposta.status(202).json({ pedido_id: pedido.id, status: 'pendente' });
   });
 
   rotas.get('/pedidos/:id', async (requisicao, resposta) => {

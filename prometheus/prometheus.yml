@@ -2,6 +2,12 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# O compose ja monta ./prometheus/regras em /etc/prometheus/regras, mas o
+# arquivo base nao declarava `rule_files`: sem esta secao a regra existe no
+# disco e o Prometheus nunca a carrega.
+rule_files:
+  - /etc/prometheus/regras/*.yml
+
 alerting:
   alertmanagers:
     - static_configs:

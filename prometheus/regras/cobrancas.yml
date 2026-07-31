@@ -1,0 +1,30 @@
+groups:
+  - name: cobrancas
+    interval: 15s
+    rules:
+      # A queixa nao aparece como erro HTTP: a api responde 202 e o pedido vai
+      # para confirmado mesmo quando a cobranca lanca excecao. O sinal que de
+      # fato revela a queixa e a proporcao de cobrancas que terminam em `falha`,
+      # que so existe porque o catch do worker passou a ser instrumentado.
+      #
+      # Baseline medido no cenario `normal`: 0 falhas em 175 cobrancas (0,00%).
+      # Medido no `cenario-a`: 62 falhas em 443 cobrancas (14,0%).
+      # Limiar em 2%: acima de qualquer ruido do normal e muito abaixo do a.
+      - alert: FalhaEmCobrancas
+        expr: >
+          sum(rate(cobrancas_processadas_total{resultado="falha"}[1m]))
+          /
+          sum(rate(cobrancas_processadas_total[1m]))
+          > 0.02
+        for: 45s
+        labels:
+          severity: critical
+          time: financeiro
+        annotations:
+          summary: Cobrancas falhando sem aparecer como erro na borda
+          description: >
+            {{ $value | humanizePercentage }} das cobrancas terminaram em falha
+            no ultimo minuto. A excecao e engolida no worker e o pedido segue
+            para `confirmado`, entao o cliente ve sucesso e o dinheiro nao entra.
+            Confira `cobrancas_processadas_total{resultado="falha"}` e os spans
+            `pedido.processar` marcados como erro no Jaeger.
