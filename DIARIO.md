@@ -275,3 +275,26 @@ com a stack no ar (resultado no FEEDBACK.md).
 Confirmado que **nao corrigi o defeito**: `git diff main..resolucao -- src/worker/index.ts`
 mostra o ternario `const status = recusado ? 'recusado' : 'confirmado'` intacto, e
 `recusado` continua sem ser tocado no `catch`.
+
+## [14:05] Fechamento
+
+Percorri os 23 criterios do zero, com a stack no ar. 22 atendidos com prova, 1 (o de
+"arquivo e linha coincidem com o gabarito") marcado como ambiguo porque a instrumentacao
+move a linha.
+
+Escrevi o `FEEDBACK.md`. Os tres achados que eu levaria para quem escreveu o desafio:
+
+1. O defeito e entregue pela leitura de codigo, e e o proprio README que obriga a abrir o
+   arquivo (requisito 1 -> `pedido_id` no worker) antes de existir telemetria. O requisito
+   6 nao funciona como esta.
+2. `prometheus.yml` sem `rule_files` (declarado "ja configurado") e o JSON de dashboard
+   sem esqueleto: ~2h perdidas em coisas que nao ensinam observabilidade.
+3. Tres criterios eliminatorios podem reprovar entrega correta: o `tail -1 | jq` (sorte de
+   timing), o "linha coincide com o gabarito" (a instrumentacao move a linha) e o
+   `git diff` de `src/` (reindentacao aparece como alteracao).
+
+Estimativa final: **~13h30** no caminho realista, contra o alvo de 10h. Cabe em ~9h com os
+sete cortes listados no FEEDBACK, sem remover nenhum requisito.
+
+Ultima conferencia: `main` intacta, tudo commitado em `resolucao`, defeito da aplicacao
+nao corrigido.
