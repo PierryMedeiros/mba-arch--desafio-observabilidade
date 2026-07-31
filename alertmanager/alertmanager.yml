@@ -1,0 +1,5 @@
+route:
+  receiver: sem-destino
+
+receivers:
+  - name: sem-destino
