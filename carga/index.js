@@ -1,6 +1,6 @@
 'use strict';
 
-const CENARIOS = ['normal', 'cenario-a', 'cenario-b'];
+const CENARIOS = ['normal', 'cenario-a'];
 
 const cenario = process.argv[2] || 'normal';
 const enderecoDaApi = process.env.API_URL || 'http://localhost:8080';
@@ -12,22 +12,21 @@ if (!CENARIOS.includes(cenario)) {
 }
 
 const INTERVALO_DE_REQUISICAO = 200;
-const INTERVALO_DO_RELATORIO = 2000;
 const INTERVALO_DO_RESUMO = 5000;
 const TOTAL_DE_CLIENTES = 400;
 const TOTAL_DE_PRODUTOS = 200;
-const PROPORCAO_DE_CLIENTES_COM_FALHA = 0.4;
+const PROPORCAO_DO_GRUPO_B = 0.4;
 const SEMENTE = 987654321;
 
-const clientesSaudaveis = [];
-const clientesComFalha = [];
+const clientesDoGrupoA = [];
+const clientesDoGrupoB = [];
 
 for (let numero = 1; numero <= TOTAL_DE_CLIENTES; numero++) {
   const identificador = 'cli-' + String(numero).padStart(4, '0');
   if (numero % 10 === 7) {
-    clientesComFalha.push(identificador);
+    clientesDoGrupoB.push(identificador);
   } else {
-    clientesSaudaveis.push(identificador);
+    clientesDoGrupoA.push(identificador);
   }
 }
 
@@ -59,8 +58,6 @@ const resumo = {
   respostas5xx: 0,
   erros: 0,
   porRota: {},
-  relatorios: 0,
-  tempoTotalDoRelatorio: 0,
 };
 
 const pedidosCriados = [];
@@ -100,12 +97,11 @@ async function chamar(rota, caminho, opcoes) {
 }
 
 function montarPedido() {
-  const usarClienteComFalha =
-    cenario === 'cenario-b' && gerar() < PROPORCAO_DE_CLIENTES_COM_FALHA;
+  const usarGrupoB = cenario === 'cenario-a' && gerar() < PROPORCAO_DO_GRUPO_B;
 
-  const clienteId = usarClienteComFalha
-    ? escolher(clientesComFalha)
-    : escolher(clientesSaudaveis);
+  const clienteId = usarGrupoB
+    ? escolher(clientesDoGrupoB)
+    : escolher(clientesDoGrupoA);
 
   const quantidadeDeItens = inteiroEntre(1, 3);
   const itens = [];
@@ -161,23 +157,6 @@ async function passo() {
   await chamar('GET /pedidos/:id', '/pedidos/' + escolher(pedidosCriados));
 }
 
-let relatorioEmAndamento = false;
-
-async function pedirRelatorio() {
-  if (relatorioEmAndamento) {
-    return;
-  }
-
-  relatorioEmAndamento = true;
-  const inicio = Date.now();
-
-  await chamar('GET /relatorios/vendas', '/relatorios/vendas');
-
-  resumo.relatorios += 1;
-  resumo.tempoTotalDoRelatorio += Date.now() - inicio;
-  relatorioEmAndamento = false;
-}
-
 function imprimirResumo() {
   const linhas = Object.keys(resumo.porRota)
     .sort()
@@ -204,33 +183,13 @@ const temporizadorDeRequisicoes = setInterval(() => {
 
 const temporizadorDoResumo = setInterval(imprimirResumo, INTERVALO_DO_RESUMO);
 
-let temporizadorDoRelatorio = null;
-if (cenario === 'cenario-a') {
-  temporizadorDoRelatorio = setInterval(() => {
-    pedirRelatorio();
-  }, INTERVALO_DO_RELATORIO);
-}
-
 function encerrar() {
   clearInterval(temporizadorDeRequisicoes);
   clearInterval(temporizadorDoResumo);
-  if (temporizadorDoRelatorio) {
-    clearInterval(temporizadorDoRelatorio);
-  }
 
   console.log('');
   console.log('resumo final');
   imprimirResumo();
-
-  if (resumo.relatorios > 0) {
-    console.log(
-      '  media do relatorio: ' +
-        Math.round(resumo.tempoTotalDoRelatorio / resumo.relatorios) +
-        'ms em ' +
-        resumo.relatorios +
-        ' chamadas'
-    );
-  }
 
   process.exit(0);
 }

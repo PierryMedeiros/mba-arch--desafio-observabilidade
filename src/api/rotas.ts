@@ -4,18 +4,24 @@ import {
   buscarPedido,
   buscarProduto,
   buscarProdutosPorIds,
-  consolidarVendas,
   criarPedido,
   listarProdutos,
   type ItemNovoPedido,
 } from '../db/consultas';
 import { publicarPedido } from '../fila/fila';
+import { log } from '../telemetria/log';
+import { TIPO_DE_CONTEUDO, coletar } from '../telemetria/metricas';
 
 export function criarRotas(redis: Redis): Router {
   const rotas = Router();
 
   rotas.get('/health', (_requisicao, resposta) => {
     resposta.status(200).json({ status: 'ok' });
+  });
+
+  rotas.get('/metrics', async (_requisicao, resposta) => {
+    resposta.set('content-type', TIPO_DE_CONTEUDO);
+    resposta.status(200).send(await coletar());
   });
 
   rotas.get('/produtos', async (_requisicao, resposta) => {
@@ -67,7 +73,7 @@ export function criarRotas(redis: Redis): Router {
       valor_total: pedido.valor_total,
     });
 
-    console.log('pedido ' + pedido.id + ' criado para ' + clienteId);
+    log.info('pedido ' + pedido.id + ' criado para ' + clienteId);
 
     resposta.status(202).json({ pedido_id: pedido.id, status: 'pendente' });
   });
@@ -88,11 +94,6 @@ export function criarRotas(redis: Redis): Router {
     }
 
     resposta.status(200).json(pedido);
-  });
-
-  rotas.get('/relatorios/vendas', async (_requisicao, resposta) => {
-    const consolidado = await consolidarVendas();
-    resposta.status(200).json(consolidado);
   });
 
   return rotas;

@@ -1,18 +1,16 @@
-name: loja-pedidos
-
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: loja
-      POSTGRES_PASSWORD: loja
-      POSTGRES_DB: loja
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - postgres-dados:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U loja -d loja"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 30
@@ -29,9 +27,10 @@ services:
 
   seed:
     build: .
-    command: npm run seed
+    command: npm run --silent seed
     environment:
-      DATABASE_URL: postgres://loja:loja@postgres:5432/loja
+      DATABASE_URL: ${DATABASE_URL}
+      NOME_DO_SERVICO: seed
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,18 +38,22 @@ services:
 
   api:
     build: .
-    command: npm run start:api
+    command: npm run --silent start:api
     environment:
-      DATABASE_URL: postgres://loja:loja@postgres:5432/loja
-      REDIS_URL: redis://redis:6379
-      API_PORT: "8080"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      API_PORT: ${API_PORT}
+      NOME_DO_SERVICO: api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports:
-      - "8080:8080"
+      - "${API_PORT}:${API_PORT}"
     depends_on:
       seed:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test:
         - CMD
@@ -68,18 +71,22 @@ services:
 
   worker:
     build: .
-    command: npm run start:worker
+    command: npm run --silent start:worker
     environment:
-      DATABASE_URL: postgres://loja:loja@postgres:5432/loja
-      REDIS_URL: redis://redis:6379
-      WORKER_PORT: "8081"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      WORKER_PORT: ${WORKER_PORT}
+      NOME_DO_SERVICO: worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports:
-      - "8081:8081"
+      - "${WORKER_PORT}:${WORKER_PORT}"
     depends_on:
       seed:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test:
         - CMD
@@ -111,8 +118,8 @@ services:
   grafana:
     image: grafana/grafana:11.6.0
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
       - "3000:3000"
@@ -156,7 +163,7 @@ services:
     entrypoint: ["node", "/app/index.js"]
     command: ["normal"]
     environment:
-      API_URL: http://api:8080
+      API_URL: ${API_URL}
     volumes:
       - ./carga:/app
     depends_on:

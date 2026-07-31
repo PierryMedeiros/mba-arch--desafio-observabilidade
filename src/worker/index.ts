@@ -3,17 +3,26 @@ import { atualizarStatusPedido } from '../db/consultas';
 import { esperarBanco, fecharPool } from '../db/pool';
 import { migrar } from '../db/migracao';
 import { consumirPedido, criarConexaoRedis } from '../fila/fila';
+import { log } from '../telemetria/log';
+import { TIPO_DE_CONTEUDO, coletar } from '../telemetria/metricas';
 import { processarPagamento } from './pagamento';
+import { registrarFalhaLegado } from './registro-legado';
 
 const porta = Number(process.env.WORKER_PORT ?? process.env.PORT ?? 8081);
 
 let rodando = true;
 
 function iniciarServidorDeSaude(): http.Server {
-  const servidor = http.createServer((requisicao, resposta) => {
+  const servidor = http.createServer(async (requisicao, resposta) => {
     if (requisicao.url === '/health') {
       resposta.writeHead(200, { 'content-type': 'application/json' });
       resposta.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+
+    if (requisicao.url === '/metrics') {
+      resposta.writeHead(200, { 'content-type': TIPO_DE_CONTEUDO });
+      resposta.end(await coletar());
       return;
     }
 
@@ -22,7 +31,7 @@ function iniciarServidorDeSaude(): http.Server {
   });
 
   servidor.listen(porta, () => {
-    console.log('worker ouvindo na porta ' + porta);
+    log.info('worker ouvindo na porta ' + porta);
   });
 
   return servidor;
@@ -33,18 +42,21 @@ async function processarMensagem(mensagem: Record<string, unknown>): Promise<voi
   const clienteId = String(mensagem.cliente_id);
   const valorTotal = Number(mensagem.valor_total);
 
+  log.info('mensagem do pedido ' + pedidoId + ' recebida da fila');
+
   let recusado = false;
 
   try {
     const resultado = await processarPagamento(clienteId, valorTotal);
     recusado = !resultado.aprovado;
   } catch (erro) {
+    registrarFalhaLegado(erro);
   }
 
   const status = recusado ? 'recusado' : 'confirmado';
   await atualizarStatusPedido(pedidoId, status);
 
-  console.log('pedido ' + pedidoId + ' ficou ' + status);
+  log.info('pedido ' + pedidoId + ' ficou ' + status);
 }
 
 async function iniciar(): Promise<void> {
@@ -66,7 +78,7 @@ async function iniciar(): Promise<void> {
   process.on('SIGINT', encerrar);
   process.on('SIGTERM', encerrar);
 
-  console.log('worker consumindo a fila de pedidos');
+  log.info('worker consumindo a fila de pedidos');
 
   while (rodando) {
     try {
@@ -76,13 +88,13 @@ async function iniciar(): Promise<void> {
         await processarMensagem(mensagem);
       }
     } catch (erro) {
-      console.log('falha ao ler a fila: ' + (erro as Error).message);
+      log.error('erro ao ler a fila: ' + (erro as Error).message);
       await new Promise((resolver) => setTimeout(resolver, 1000));
     }
   }
 }
 
 iniciar().catch((erro) => {
-  console.log('worker nao conseguiu iniciar: ' + erro.message);
+  log.error('worker nao conseguiu iniciar: ' + erro.message);
   process.exit(1);
 });

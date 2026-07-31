@@ -1,12 +1,12 @@
 import { migrar } from '../src/db/migracao';
 import { esperarBanco, fecharPool, pool } from '../src/db/pool';
+import { log } from '../src/telemetria/log';
 
 const TOTAL_PRODUTOS = 200;
-const TOTAL_PEDIDOS = 60000;
+const TOTAL_PEDIDOS = 24;
 const TOTAL_CLIENTES = 400;
-const DIAS_DE_HISTORICO = 30;
+const DIAS_DE_HISTORICO = 7;
 const SEMENTE = 20240101;
-const TAMANHO_DO_LOTE = 2000;
 
 const TIPOS = [
   'Cadeira',
@@ -98,78 +98,20 @@ async function carregarProdutos(gerar: () => number): Promise<number[]> {
   return precos;
 }
 
-async function inserirLotePedidos(
-  ids: number[],
-  clientes: string[],
-  status: string[],
-  valores: number[],
-  datas: Date[]
-): Promise<void> {
-  await pool.query(
-    `INSERT INTO pedidos (id, cliente_id, status, valor_total, criado_em)
-     SELECT * FROM unnest($1::int[], $2::text[], $3::text[], $4::numeric[], $5::timestamptz[])`,
-    [ids, clientes, status, valores, datas]
-  );
-}
-
-async function inserirLoteItens(
-  pedidoIds: number[],
-  produtoIds: number[],
-  quantidades: number[],
-  precos: number[]
-): Promise<void> {
-  await pool.query(
-    `INSERT INTO pedido_itens (pedido_id, produto_id, quantidade, preco_unitario)
-     SELECT * FROM unnest($1::int[], $2::int[], $3::int[], $4::numeric[])`,
-    [pedidoIds, produtoIds, quantidades, precos]
-  );
-}
-
-async function carregarPedidos(gerar: () => number, precos: number[]): Promise<void> {
+async function carregarPedidos(gerar: () => number, precos: number[]): Promise<number> {
   const agora = Date.now();
   const janela = DIAS_DE_HISTORICO * 24 * 60 * 60 * 1000;
 
-  let pedidosIds: number[] = [];
-  let pedidosClientes: string[] = [];
-  let pedidosStatus: string[] = [];
-  let pedidosValores: number[] = [];
-  let pedidosDatas: Date[] = [];
+  const pedidosIds: number[] = [];
+  const pedidosClientes: string[] = [];
+  const pedidosStatus: string[] = [];
+  const pedidosValores: number[] = [];
+  const pedidosDatas: Date[] = [];
 
-  let itensPedidoIds: number[] = [];
-  let itensProdutoIds: number[] = [];
-  let itensQuantidades: number[] = [];
-  let itensPrecos: number[] = [];
-
-  const descarregar = async () => {
-    if (pedidosIds.length === 0) {
-      return;
-    }
-
-    await inserirLotePedidos(
-      pedidosIds,
-      pedidosClientes,
-      pedidosStatus,
-      pedidosValores,
-      pedidosDatas
-    );
-    await inserirLoteItens(
-      itensPedidoIds,
-      itensProdutoIds,
-      itensQuantidades,
-      itensPrecos
-    );
-
-    pedidosIds = [];
-    pedidosClientes = [];
-    pedidosStatus = [];
-    pedidosValores = [];
-    pedidosDatas = [];
-
-    itensPedidoIds = [];
-    itensProdutoIds = [];
-    itensQuantidades = [];
-    itensPrecos = [];
-  };
+  const itensPedidoIds: number[] = [];
+  const itensProdutoIds: number[] = [];
+  const itensQuantidades: number[] = [];
+  const itensPrecos: number[] = [];
 
   for (let pedidoId = 1; pedidoId <= TOTAL_PEDIDOS; pedidoId++) {
     const sorteioDeStatus = gerar();
@@ -197,15 +139,23 @@ async function carregarPedidos(gerar: () => number, precos: number[]): Promise<v
     pedidosStatus.push(status);
     pedidosValores.push(Math.round(valorTotal * 100) / 100);
     pedidosDatas.push(new Date(agora - Math.floor(gerar() * janela)));
-
-    if (pedidosIds.length >= TAMANHO_DO_LOTE) {
-      await descarregar();
-    }
   }
 
-  await descarregar();
+  await pool.query(
+    `INSERT INTO pedidos (id, cliente_id, status, valor_total, criado_em)
+     SELECT * FROM unnest($1::int[], $2::text[], $3::text[], $4::numeric[], $5::timestamptz[])`,
+    [pedidosIds, pedidosClientes, pedidosStatus, pedidosValores, pedidosDatas]
+  );
+
+  await pool.query(
+    `INSERT INTO pedido_itens (pedido_id, produto_id, quantidade, preco_unitario)
+     SELECT * FROM unnest($1::int[], $2::int[], $3::int[], $4::numeric[])`,
+    [itensPedidoIds, itensProdutoIds, itensQuantidades, itensPrecos]
+  );
 
   await pool.query("SELECT setval('pedidos_id_seq', $1)", [TOTAL_PEDIDOS]);
+
+  return itensPedidoIds.length;
 }
 
 async function executar(): Promise<void> {
@@ -213,7 +163,7 @@ async function executar(): Promise<void> {
   await migrar();
 
   if (await jaFoiCarregado()) {
-    console.log('seed ja aplicado, nada a fazer');
+    log.info('seed ja aplicado, nada a fazer');
     return;
   }
 
@@ -221,16 +171,15 @@ async function executar(): Promise<void> {
 
   const gerar = criarGerador(SEMENTE);
   const precos = await carregarProdutos(gerar);
-  await carregarPedidos(gerar, precos);
+  const totalDeItens = await carregarPedidos(gerar, precos);
 
-  const itens = await pool.query('SELECT count(*)::int AS total FROM pedido_itens');
-  console.log(
+  log.info(
     'seed aplicado com ' +
       TOTAL_PRODUTOS +
       ' produtos, ' +
       TOTAL_PEDIDOS +
       ' pedidos e ' +
-      itens.rows[0].total +
+      totalDeItens +
       ' itens'
   );
 }
@@ -241,7 +190,7 @@ executar()
     process.exit(0);
   })
   .catch(async (erro) => {
-    console.log('seed falhou: ' + erro.message);
+    log.error('seed nao pode ser aplicado: ' + erro.message);
     await fecharPool();
     process.exit(1);
   });

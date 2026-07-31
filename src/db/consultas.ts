@@ -26,13 +26,6 @@ export type ItemNovoPedido = {
   quantidade: number;
 };
 
-export type LinhaRelatorio = {
-  produto_id: number;
-  nome: string;
-  quantidade_vendida: number;
-  valor_total: number;
-};
-
 export async function listarProdutos(): Promise<Produto[]> {
   const resultado = await pool.query(
     'SELECT id, nome, preco FROM produtos ORDER BY id'
@@ -162,47 +155,4 @@ export async function atualizarStatusPedido(
   status: string
 ): Promise<void> {
   await pool.query('UPDATE pedidos SET status = $1 WHERE id = $2', [status, id]);
-}
-
-export async function consolidarVendas(): Promise<LinhaRelatorio[]> {
-  const produtosResultado = await pool.query(
-    `SELECT DISTINCT i.produto_id
-       FROM pedido_itens i
-       JOIN pedidos p ON p.id = i.pedido_id
-      WHERE p.status = 'confirmado'
-        AND p.criado_em >= NOW() - INTERVAL '30 days'
-      ORDER BY i.produto_id`
-  );
-
-  const consolidado: LinhaRelatorio[] = [];
-
-  for (const linhaProduto of produtosResultado.rows) {
-    const totalResultado = await pool.query(
-      `SELECT pr.nome,
-              SUM(i.quantidade) AS quantidade_vendida,
-              SUM(i.quantidade * pr.preco) AS valor_total
-         FROM pedido_itens i
-         JOIN pedidos p ON p.id = i.pedido_id
-         JOIN produtos pr ON pr.id = i.produto_id
-        WHERE i.produto_id = $1
-          AND p.status = 'confirmado'
-          AND p.criado_em >= NOW() - INTERVAL '30 days'
-        GROUP BY pr.nome`,
-      [linhaProduto.produto_id]
-    );
-
-    const total = totalResultado.rows[0];
-    if (!total) {
-      continue;
-    }
-
-    consolidado.push({
-      produto_id: linhaProduto.produto_id,
-      nome: total.nome,
-      quantidade_vendida: Number(total.quantidade_vendida),
-      valor_total: Math.round(Number(total.valor_total) * 100) / 100,
-    });
-  }
-
-  return consolidado;
 }

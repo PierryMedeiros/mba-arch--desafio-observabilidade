@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { log } from '../telemetria/log';
 
 const connectionString =
   process.env.DATABASE_URL ?? 'postgres://loja:loja@localhost:5432/loja';
@@ -15,7 +16,7 @@ export async function esperarBanco(tentativas = 30): Promise<void> {
       await pool.query('SELECT 1');
       return;
     } catch (erro) {
-      console.log('banco ainda nao respondeu, tentativa ' + tentativa);
+      log.warn('banco ainda nao respondeu, tentativa ' + tentativa);
       await new Promise((resolver) => setTimeout(resolver, 1000));
     }
   }
