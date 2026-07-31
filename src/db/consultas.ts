@@ -165,8 +165,8 @@ export async function atualizarStatusPedido(
 }
 
 export async function consolidarVendas(): Promise<LinhaRelatorio[]> {
-  const itensResultado = await pool.query(
-    `SELECT i.produto_id, i.quantidade
+  const produtosResultado = await pool.query(
+    `SELECT DISTINCT i.produto_id
        FROM pedido_itens i
        JOIN pedidos p ON p.id = i.pedido_id
       WHERE p.status = 'confirmado'
@@ -174,34 +174,35 @@ export async function consolidarVendas(): Promise<LinhaRelatorio[]> {
       ORDER BY i.produto_id`
   );
 
-  const consolidado = new Map<number, LinhaRelatorio>();
+  const consolidado: LinhaRelatorio[] = [];
 
-  for (const item of itensResultado.rows) {
-    const produtoResultado = await pool.query(
-      'SELECT nome, preco FROM produtos WHERE id = $1',
-      [item.produto_id]
+  for (const linhaProduto of produtosResultado.rows) {
+    const totalResultado = await pool.query(
+      `SELECT pr.nome,
+              SUM(i.quantidade) AS quantidade_vendida,
+              SUM(i.quantidade * pr.preco) AS valor_total
+         FROM pedido_itens i
+         JOIN pedidos p ON p.id = i.pedido_id
+         JOIN produtos pr ON pr.id = i.produto_id
+        WHERE i.produto_id = $1
+          AND p.status = 'confirmado'
+          AND p.criado_em >= NOW() - INTERVAL '30 days'
+        GROUP BY pr.nome`,
+      [linhaProduto.produto_id]
     );
 
-    const produto = produtoResultado.rows[0];
-    if (!produto) {
+    const total = totalResultado.rows[0];
+    if (!total) {
       continue;
     }
 
-    const linha = consolidado.get(item.produto_id) ?? {
-      produto_id: item.produto_id,
-      nome: produto.nome,
-      quantidade_vendida: 0,
-      valor_total: 0,
-    };
-
-    linha.quantidade_vendida += item.quantidade;
-    linha.valor_total += item.quantidade * Number(produto.preco);
-
-    consolidado.set(item.produto_id, linha);
+    consolidado.push({
+      produto_id: linhaProduto.produto_id,
+      nome: total.nome,
+      quantidade_vendida: Number(total.quantidade_vendida),
+      valor_total: Math.round(Number(total.valor_total) * 100) / 100,
+    });
   }
 
-  return [...consolidado.values()].map((linha) => ({
-    ...linha,
-    valor_total: Math.round(linha.valor_total * 100) / 100,
-  }));
+  return consolidado;
 }

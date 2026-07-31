@@ -2,7 +2,7 @@ import { migrar } from '../src/db/migracao';
 import { esperarBanco, fecharPool, pool } from '../src/db/pool';
 
 const TOTAL_PRODUTOS = 200;
-const TOTAL_PEDIDOS = 12000;
+const TOTAL_PEDIDOS = 60000;
 const TOTAL_CLIENTES = 400;
 const DIAS_DE_HISTORICO = 30;
 const SEMENTE = 20240101;
