@@ -35,6 +35,8 @@ https://github.com/devfullcycle/REPO-A-DEFINIR
 
 Faça o fork e trabalhe nele. A entrega final fica na branch `main` do seu fork.
 
+Pré-requisitos: Docker, Docker Compose v2 e `curl`. Nada além disso precisa estar instalado na sua máquina.
+
 ```
 cp .env.example .env
 docker compose up -d
@@ -68,9 +70,9 @@ Este é o ponto de partida. Confira cada item com os próprios olhos antes de co
 - **Tracing automático funcionando.** O SDK do OpenTelemetry já sobe nos dois processos, com auto instrumentação de HTTP e de banco, exportando por OTLP para o Jaeger com amostragem em 100%. Uma requisição já vira trace com spans de rota e de consulta
 - **Log em JSON.** Os dois processos já escrevem uma linha JSON por evento no stdout, com os campos `timestamp`, `level`, `service` e `msg`. Não existe nenhum campo que ligue a linha a um trace
 - **Rota `/metrics` com `prom-client`.** Já existem as métricas padrão do processo e um histograma de latência HTTP chamado `http_request_duration_seconds`. Não existe nenhuma métrica de negócio
-- **Prometheus coletando.** Os dois processos já aparecem como `UP` em `http://localhost:9090/targets`
-- **Grafana com datasources.** Prometheus e Jaeger já provisionados por arquivo. A pasta de dashboards está vazia
-- **Alertmanager ligado ao receptor.** A rota e o receiver já apontam para o `receptor-alertas`. Não existe nenhuma regra de alerta
+- **Prometheus coletando.** Os dois processos já aparecem como `UP` em `http://localhost:9090/targets`, e o `prometheus.yml` já declara de onde ler as regras de alerta. A pasta de regras é que está vazia
+- **Grafana com datasources e um dashboard começado.** Prometheus e Jaeger já provisionados por arquivo, e existe um dashboard provisionado com um painel só, para você não precisar descobrir o formato do JSON do zero
+- **Alertmanager ligado ao receptor.** A rota e o receiver já apontam para o `receptor-alertas`, com o agrupamento já ajustado para o disparo ser rápido. Não existe nenhuma regra de alerta
 
 ### O que não está
 
@@ -109,6 +111,8 @@ Por quê. Log e trace hoje são duas ilhas. Você tem o trace de uma operação 
 
 Tarefa. Acrescente a toda linha de log dos dois processos os campos `trace_id` e `span_id`, com esses nomes exatos, preenchidos a partir do span ativo no momento em que a linha é escrita. Linhas relacionadas a um pedido carregam também `pedido_id`.
 
+Os dois campos existem em toda linha, sempre. Quando não houver span ativo, como na subida do processo, eles vão vazios. Campo que aparece e some conforme o contexto quebra qualquer filtro automático em cima do log.
+
 O identificador tem que ser o mesmo que aparece no Jaeger. Identificador próprio, gerado pela aplicação e desconectado do trace, não atende.
 
 ### 2. Tracing manual e travessia da fila
@@ -129,7 +133,7 @@ Por quê. O histograma que já existe comete o erro de cardinalidade mais cláss
 Tarefa. Três coisas.
 
 - Encontre o erro de cardinalidade na instrumentação de métricas existente, corrija, e explique no README em uma frase por que aquilo derrubaria um Prometheus em produção
-- Crie três métricas de negócio, com estes nomes e tipos exatos: `pedidos_criados_total` e `pedidos_confirmados_total`, contadores, e `cobrancas_processadas_total`, contador com o label `resultado`, que assume os valores `aprovada`, `recusada` e `falha`. Recusa e falha não são a mesma coisa, e tratar as duas como uma só é o caminho mais curto para não achar a queixa
+- Crie três métricas de negócio, com estes nomes e tipos exatos: `pedidos_criados_total` e `pedidos_confirmados_total`, contadores, e `cobrancas_processadas_total`, contador com o label `resultado`, que assume os valores `aprovada`, `recusada` e `falha`
 - Inicialize os três contadores em zero na subida, incluindo cada valor do label `resultado`. Série que só nasce no primeiro evento some do gráfico enquanto está tudo bem e quebra o alerta que dependia dela
 
 A proibição de cardinalidade vale para métrica. Em span e em log o identificador é bem-vindo e necessário, porque lá ele custa barato e é o que permite achar o caso individual.
@@ -138,13 +142,13 @@ A proibição de cardinalidade vale para métrica. Em span e em log o identifica
 
 Por quê. Dashboard construído na mão dentro do Grafana morre com o container: não é versionado, não é revisado, ninguém sabe quem mudou o quê. E dashboard eficaz não é o que mostra tudo, é o que cabe numa tela e responde as perguntas que alguém vai fazer às três da manhã.
 
-Tarefa. Um dashboard, provisionado por arquivo JSON versionado no repositório, com no máximo quatro painéis, que responda estas três perguntas:
+Tarefa. Complete o dashboard que já vem provisionado no repositório, que hoje tem um painel só. No fim ele tem no máximo quatro painéis e responde estas três perguntas:
 
 - o sistema está com erro?
 - o sistema está lento?
 - o dinheiro está entrando?
 
-Quais painéis usar para responder é decisão sua. Todo painel com título que diz o que ele mostra.
+Quais painéis usar para responder é decisão sua, e o teto de quatro é parte do exercício. Todo painel com título que diz o que ele mostra, e o README diz qual das três perguntas cada painel responde.
 
 ### 5. Alerta
 
@@ -154,7 +158,7 @@ Tarefa. Escreva no Prometheus uma regra chamada exatamente `FalhaEmCobrancas`, q
 
 - Atenção: nem toda falha aparece como erro HTTP na borda. A regra precisa ser escrita sobre o sinal que de fato revela a queixa, e descobrir qual é esse sinal é parte do trabalho
 - `for` entre 30s e 1m. É um limite do desafio, para o disparo ser observável durante a correção
-- O Alertmanager já está apontando para o `receptor-alertas`, mas o `group_wait` padrão dele soma mais tempo até o webhook sair. Ajuste se precisar, e saiba que ele existe antes de achar que a sua regra está quebrada
+- O Alertmanager agrupa alertas e espera um intervalo antes de disparar o webhook. O starter já vem com esse intervalo curto, então some ao seu `for` mais alguns segundos e saiba que isso existe antes de achar que a sua regra está quebrada
 - O limiar é decisão sua. O README traz o valor observado no cenário `normal`, o limiar escolhido e o `for`
 - Comportamento exigido: a regra não dispara no cenário `normal` e dispara no `cenario-a`
 
@@ -165,15 +169,15 @@ Por quê. Este é o requisito que separa quem instrumentou de quem entendeu. A i
 Tarefa. Investigue a queixa usando a sua instrumentação e escreva `reports/incidente.md` com exatamente estas quatro seções, com estes títulos:
 
 - `## Sintoma`: a queixa em uma frase e como reproduzir
-- `## Evidência`: um `trace_id` real observado no Jaeger, a query PromQL usada, o comando de busca no log usado, e ao menos uma imagem de painel ou tela
-- `## Causa raiz`: o que causa o comportamento, citando arquivo e número de linha
+- `## Evidência`: um `trace_id` real observado no Jaeger, a query PromQL usada e o comando de busca no log usado, cada um com o resultado que você obteve
+- `## Causa raiz`: o que causa o comportamento, citando o arquivo e a função onde ele mora, e colando o trecho de código responsável
 - `## Correção sugerida`: o que você faria para resolver, sem fazer
 
 E substitua o `README.md` do projeto base por um com estas três seções, com estes títulos:
 
 - `## Como rodar`: do clone à stack no ar
 - `## Equivalências com o curso`: tabela com quatro linhas, uma para métricas, uma para tracing, uma para logs estruturados e uma para propagação de contexto, dizendo o que o curso usou em Java e o que você usou em TypeScript
-- `## Decisões e limiares`: a explicação do erro de cardinalidade, o que cada métrica de negócio responde, e o valor observado no `normal`, o limiar e o `for` do alerta
+- `## Decisões e limiares`: a explicação do erro de cardinalidade, o que cada métrica de negócio responde, qual das três perguntas cada painel do dashboard responde, e o valor observado no `normal`, o limiar e o `for` do alerta
 
 ## Restrições (não negociáveis)
 
@@ -199,7 +203,7 @@ Todos os critérios são eliminatórios: qualquer item não atendido reprova a e
 
 Logs
 
-☐ `docker compose logs api | grep '"msg"' | tail -1 | jq .` devolve JSON com `timestamp`, `level`, `service`, `msg`, `trace_id` e `span_id`, e o mesmo vale para `worker`
+☐ Toda linha de log dos dois processos é JSON e traz `timestamp`, `level`, `service`, `msg`, `trace_id` e `span_id`, mesmo quando os dois últimos estão vazios. Confira com `docker compose logs api | tail -20` e `docker compose logs worker | tail -20`
 ☐ Linhas relacionadas a um pedido trazem `pedido_id`
 ☐ Rodando `cenario-a`, aparecem linhas de nível `error` com o motivo da falha
 
@@ -221,7 +225,7 @@ Dashboard
 
 ☐ Existe exatamente um dashboard provisionado por arquivo JSON versionado, e ele abre no Grafana logo após a subida, sem nenhum clique de configuração
 ☐ Tem no máximo quatro painéis, nenhum com título vazio ou igual a `Panel Title`
-☐ Os painéis respondem às três perguntas do requisito 4
+☐ O README diz, para cada painel, qual das três perguntas do requisito 4 ele responde
 
 Alerta
 
@@ -232,14 +236,14 @@ Alerta
 Diagnóstico e README
 
 ☐ Existe `reports/incidente.md` com as quatro seções exigidas, com os títulos exatos
-☐ O relatório cita um `trace_id`, uma query PromQL, um comando de busca no log e traz ao menos uma imagem
-☐ A seção `## Causa raiz` cita arquivo e linha, e ambos coincidem com o gabarito de correção
+☐ A seção `## Evidência` traz um `trace_id`, uma query PromQL e um comando de busca no log, cada um com o resultado obtido
+☐ A seção `## Causa raiz` cita o arquivo e a função onde o defeito mora, e ambos coincidem com o gabarito de correção
 ☐ O `README.md` tem as três seções exigidas, com os títulos exatos, e a tabela de equivalências está preenchida com o que foi usado de fato no código
 
 Integridade
 
 ☐ `git diff` contra o repositório base não mostra alteração em `carga/` nem em `receptor-alertas/`
-☐ `git diff` contra o repositório base em `src/` mostra apenas linhas de instrumentação, sem alteração no fluxo da aplicação
+☐ `git diff -w` contra o repositório base em `src/` mostra apenas linhas de instrumentação, sem alteração no fluxo da aplicação. A opção `-w` existe porque envolver um bloco em um span reindenta o código sem mudar nada
 
 ## Estrutura obrigatória do entregável
 
@@ -256,14 +260,14 @@ Integridade
 ├── carga/                        (não alterar)
 ├── receptor-alertas/             (não alterar)
 ├── prometheus/
-│   ├── prometheus.yml            já configurado
+│   ├── prometheus.yml            já configurado, inclusive de onde ler as regras
 │   └── regras/                   (você preenche)
 ├── alertmanager/
 │   └── alertmanager.yml          já configurado
 ├── grafana/
 │   └── provisioning/
 │       ├── datasources/          já configurado
-│       └── dashboards/           (você preenche)
+│       └── dashboards/           um painel pronto, você completa
 └── reports/
     └── incidente.md              (você escreve)
 ```
@@ -281,9 +285,9 @@ Integridade
 
 **2.** Comece pela correlação de log com trace. É a peça mais barata e a que mais muda o seu dia dali em diante: sem ela, você vai depurar o resto no escuro. Só considere pronto quando conseguir pegar um `trace_id` no Jaeger e achar as linhas dos dois processos por aquele identificador.
 
-**3.** Faça os spans manuais e depois a travessia da fila. Este é o ponto mais difícil do desafio. O contexto de trace não é mágica do framework, é dado que precisa viajar junto com a mensagem, e o OpenTelemetry tem uma API própria de propagação para isso. Se ao consumir a mensagem você começar um trace novo em vez de continuar o que existia, o sintoma é claro: dois traces curtos no Jaeger em vez de um completo. E preste atenção em qual contexto você usa como base ao extrair, porque usar o contexto ativo do worker em vez de um contexto raiz é o erro que faz o span nascer no lugar errado.
+**3.** Ataque as métricas: conserte a cardinalidade primeiro, porque ela suja tudo que vem depois, e só então crie as de negócio. Feito isso, suba os dois cenários e passe alguns minutos só olhando os números subirem. Métrica de negócio serve para levantar pergunta, e é bem provável que você saia daqui com uma.
 
-**4.** Ataque as métricas: conserte a cardinalidade primeiro, porque ela suja tudo que vem depois, e só então crie as de negócio.
+**4.** Faça os spans manuais e depois a travessia da fila. Este é o ponto mais difícil do desafio. O contexto de trace não é mágica do framework, é dado que precisa viajar junto com a mensagem, e o OpenTelemetry tem uma API própria de propagação para isso. Se ao consumir a mensagem você começar um trace novo em vez de continuar o que existia, o sintoma é claro: dois traces curtos no Jaeger em vez de um completo. E preste atenção em qual contexto você usa como base ao extrair, porque usar o contexto ativo do worker em vez de um contexto raiz é o erro que faz o span nascer no lugar errado.
 
 **5.** Monte o dashboard por arquivo. Derrube tudo com `docker compose down -v`, suba de novo e confirme que os painéis voltaram sozinhos.
 
