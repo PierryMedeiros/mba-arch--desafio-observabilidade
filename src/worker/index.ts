@@ -5,8 +5,7 @@ import { migrar } from '../db/migracao';
 import { consumirPedido, criarConexaoRedis } from '../fila/fila';
 import { log } from '../telemetria/log';
 import { TIPO_DE_CONTEUDO, coletar } from '../telemetria/metricas';
-import { processarPagamento } from './pagamento';
-import { registrarFalhaLegado } from './registro-legado';
+import { decidirStatusDoPedido } from './conciliacao';
 
 const porta = Number(process.env.WORKER_PORT ?? process.env.PORT ?? 8081);
 
@@ -44,16 +43,7 @@ async function processarMensagem(mensagem: Record<string, unknown>): Promise<voi
 
   log.info('mensagem do pedido ' + pedidoId + ' recebida da fila');
 
-  let recusado = false;
-
-  try {
-    const resultado = await processarPagamento(clienteId, valorTotal);
-    recusado = !resultado.aprovado;
-  } catch (erro) {
-    registrarFalhaLegado(erro);
-  }
-
-  const status = recusado ? 'recusado' : 'confirmado';
+  const status = await decidirStatusDoPedido(clienteId, valorTotal);
   await atualizarStatusPedido(pedidoId, status);
 
   log.info('pedido ' + pedidoId + ' ficou ' + status);
